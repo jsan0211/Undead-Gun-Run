@@ -1,0 +1,25 @@
+# Node.js
+node_modules/
+.env
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# VS Code config
+.vscode/
+
+# System junk
+*.swp
+*.swo
+
+# Optional: exclude your local test scripts or notes
+*.ps1
+*.bat
+*.sh
+*.md.bak
