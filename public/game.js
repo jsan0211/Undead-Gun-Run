@@ -1,18 +1,10 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
-const socket = io();  // Connects to the current server automatically
-
-socket.on("connect", () => {
-    console.log("Connected to server with ID:", socket.id);
-});
-
-
-// Canvas dimensions
 canvas.width = 1600;
 canvas.height = 1200;
 
-// Player setup
+// Local player
 const player = {
     x: canvas.width / 2,
     y: canvas.height / 2,
@@ -21,29 +13,68 @@ const player = {
     speed: 5
 };
 
-// Bullet setup
+const zombies = [];
+const zombieSize = 50;
+
 const bullets = [];
+const remoteBullets = [];
 const bulletSpeed = 10;
 const bulletSize = 5;
 
-// Zombie setup
-const zombies = [
-    { x: 100, y: 100, speed: 1 },
-    { x: 1500, y: 1000, speed: 1 }
-];
-
-const zombieSize = 50;
-
-
-// Keyboard input
+const remotePlayers = {};
 const keys = {};
 
-document.addEventListener("keydown", e => {
-    keys[e.key.toLowerCase()] = true;
+// Socket connection
+const socket = io();
+
+socket.on("currentPlayers", (players) => {
+    for (const id in players) {
+        if (id !== socket.id) {
+            remotePlayers[id] = players[id];
+        }
+    }
 });
-document.addEventListener("keyup", e => {
-    keys[e.key.toLowerCase()] = false;
+
+socket.on("newPlayer", (data) => {
+    remotePlayers[data.id] = { x: data.x, y: data.y };
 });
+
+socket.on("playerMoved", (data) => {
+    if (remotePlayers[data.id]) {
+        remotePlayers[data.id].x = data.x;
+        remotePlayers[data.id].y = data.y;
+    }
+});
+
+socket.on("playerDisconnected", (id) => {
+    delete remotePlayers[id];
+});
+
+socket.on("existingZombies", (serverZombies) => {
+    zombies.push(...serverZombies);
+});
+
+socket.on("spawnZombie", (z) => {
+    zombies.push(z);
+});
+
+socket.on("zombieRemoved", (id) => {
+    const i = zombies.findIndex(z => z.id === id);
+    if (i !== -1) zombies.splice(i, 1);
+});
+
+socket.on("remoteBullet", (data) => {
+    remoteBullets.push({
+        x: data.x,
+        y: data.y,
+        dx: data.dx,
+        dy: data.dy
+    });
+});
+
+// Input
+document.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+document.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
 
 document.addEventListener("mousedown", (e) => {
     const rect = canvas.getBoundingClientRect();
@@ -59,7 +90,9 @@ document.addEventListener("mousedown", (e) => {
     const normX = dx / dist;
     const normY = dy / dist;
 
-    bullets.push({
+    bullets.push({ x: startX, y: startY, dx: normX, dy: normY });
+
+    socket.emit("shootBullet", {
         x: startX,
         y: startY,
         dx: normX,
@@ -67,22 +100,40 @@ document.addEventListener("mousedown", (e) => {
     });
 });
 
-
-// Game loop
 function update() {
-    // Player movement
     if (keys["w"]) player.y -= player.speed;
     if (keys["s"]) player.y += player.speed;
     if (keys["a"]) player.x -= player.speed;
     if (keys["d"]) player.x += player.speed;
 
-    // Bullet movement
     for (let bullet of bullets) {
         bullet.x += bullet.dx * bulletSpeed;
         bullet.y += bullet.dy * bulletSpeed;
     }
 
-    // Move zombies toward player
+    for (let i = zombies.length - 1; i >= 0; i--) {
+        const z = zombies[i];
+        const zr = { x: z.x, y: z.y, w: zombieSize, h: zombieSize };
+
+        for (let j = bullets.length - 1; j >= 0; j--) {
+            const b = bullets[j];
+            const br = { x: b.x, y: b.y, w: bulletSize, h: bulletSize };
+
+            const hit = (
+                br.x < zr.x + zr.w &&
+                br.x + br.w > zr.x &&
+                br.y < zr.y + zr.h &&
+                br.y + br.h > zr.y
+            );
+
+            if (hit) {
+                socket.emit("zombieHit", z.id);
+                bullets.splice(j, 1);
+                break;
+            }
+        }
+    }
+
     for (let zombie of zombies) {
         const dx = (player.x + player.width / 2) - (zombie.x + zombieSize / 2);
         const dy = (player.y + player.height / 2) - (zombie.y + zombieSize / 2);
@@ -93,36 +144,52 @@ function update() {
         }
     }
 
-    // Remove bullets that go off screen
-    for (let i = bullets.length - 1; i >= 0; i--) {
-        const b = bullets[i];
+    bullets.forEach((b, i) => {
         if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
             bullets.splice(i, 1);
         }
-    }
-}
+    });
 
+    remoteBullets.forEach((b, i) => {
+        if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
+            remoteBullets.splice(i, 1);
+        }
+    });
+
+    socket.emit("playerMove", { x: player.x, y: player.y });
+}
 
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw player
+    // Local player
     ctx.fillStyle = "red";
     ctx.fillRect(player.x, player.y, player.width, player.height);
 
-    // Draw bullets
+    // Remote players
+    ctx.fillStyle = "green";
+    for (const id in remotePlayers) {
+        const p = remotePlayers[id];
+        ctx.fillRect(p.x, p.y, player.width, player.height);
+    }
+
+    // Local bullets
     ctx.fillStyle = "yellow";
-    for (let bullet of bullets) {
+    for (const bullet of bullets) {
         ctx.fillRect(bullet.x, bullet.y, bulletSize, bulletSize);
     }
 
-    // Draw zombies
+    // Remote bullets
+    ctx.fillStyle = "orange";
+    for (const bullet of remoteBullets) {
+        ctx.fillRect(bullet.x, bullet.y, bulletSize, bulletSize);
+    }
+
     ctx.fillStyle = "brown";
-    for (let zombie of zombies) {
-        ctx.fillRect(zombie.x, zombie.y, zombieSize, zombieSize);
+    for (let z of zombies) {
+        ctx.fillRect(z.x, z.y, zombieSize, zombieSize);
     }
 }
-
 
 function gameLoop() {
     update();
