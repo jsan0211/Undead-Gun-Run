@@ -23,7 +23,7 @@ setInterval(() => {
         id: Date.now(), // unique ID
         x: Math.random() * 1600,
         y: Math.random() * 1200,
-        speed: 0.5 + Math.random(),
+        speed: 0.5 + Math.random() * 2.5,
     };
     zombies.push(zombie);
     io.emit("spawnZombie", zombie);
@@ -49,6 +49,40 @@ io.on("connection", (socket) => {
             io.emit("zombieRemoved", id);
         }
     });
+
+        setInterval(() => {
+        if (zombies.length === 0 || Object.keys(players).length === 0) return;
+
+        for (let zombie of zombies) {
+            // Find the closest player
+            let closestPlayer = null;
+            let minDist = Infinity;
+
+            for (const id in players) {
+                const p = players[id];
+                const dx = (p.x + 25) - (zombie.x + 25);
+                const dy = (p.y + 25) - (zombie.y + 25);
+                const dist = Math.hypot(dx, dy);
+
+                if (dist < minDist && dist < 300) { // match detection radius
+                    minDist = dist;
+                    closestPlayer = p;
+                }
+            }
+
+            if (closestPlayer) {
+                const dx = (closestPlayer.x + 25) - (zombie.x + 25);
+                const dy = (closestPlayer.y + 25) - (zombie.y + 25);
+                const dist = Math.hypot(dx, dy);
+
+                zombie.x += (dx / dist) * zombie.speed;
+                zombie.y += (dy / dist) * zombie.speed;
+            }
+        }
+
+        io.emit("zombiePositions", zombies);
+    }, 1000 / 30); // 30 updates per second
+
 
     socket.emit("currentPlayers", players);
     socket.broadcast.emit("newPlayer", { id: socket.id, ...players[socket.id] });

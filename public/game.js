@@ -4,10 +4,13 @@ const ctx = canvas.getContext("2d");
 canvas.width = 1600;
 canvas.height = 1200;
 
+const worldWidth = 5000;
+const worldHeight = 5000;
+
 // Local player
 const player = {
-    x: canvas.width / 2,
-    y: canvas.height / 2,
+    x: worldWidth / 2,
+    y: worldHeight / 2,
     width: 50,
     height: 50,
     speed: 5
@@ -72,6 +75,11 @@ socket.on("remoteBullet", (data) => {
     });
 });
 
+socket.on("zombiePositions", (serverZombies) => {
+    zombies.length = 0;
+    zombies.push(...serverZombies);
+});
+
 // Input
 document.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
 document.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
@@ -81,11 +89,14 @@ document.addEventListener("mousedown", (e) => {
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
+    const worldMouseX = mouseX - canvas.width / 2 + player.x;
+    const worldMouseY = mouseY - canvas.height / 2 + player.y;
+
     const startX = player.x + player.width / 2;
     const startY = player.y + player.height / 2;
 
-    const dx = mouseX - startX;
-    const dy = mouseY - startY;
+    const dx = worldMouseX - startX;
+    const dy = worldMouseY - startY;
     const dist = Math.hypot(dx, dy);
     const normX = dx / dist;
     const normY = dy / dist;
@@ -105,6 +116,10 @@ function update() {
     if (keys["s"]) player.y += player.speed;
     if (keys["a"]) player.x -= player.speed;
     if (keys["d"]) player.x += player.speed;
+
+    // Constrain player to world bounds
+    player.x = Math.max(0, Math.min(player.x, worldWidth - player.width));
+    player.y = Math.max(0, Math.min(player.y, worldHeight - player.height));
 
     for (let bullet of bullets) {
         bullet.x += bullet.dx * bulletSpeed;
@@ -134,24 +149,14 @@ function update() {
         }
     }
 
-    for (let zombie of zombies) {
-        const dx = (player.x + player.width / 2) - (zombie.x + zombieSize / 2);
-        const dy = (player.y + player.height / 2) - (zombie.y + zombieSize / 2);
-        const dist = Math.hypot(dx, dy);
-        if (dist > 0) {
-            zombie.x += (dx / dist) * zombie.speed;
-            zombie.y += (dy / dist) * zombie.speed;
-        }
-    }
-
     bullets.forEach((b, i) => {
-        if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
+        if (b.x < 0 || b.x > worldWidth || b.y < 0 || b.y > worldHeight) {
             bullets.splice(i, 1);
         }
     });
 
     remoteBullets.forEach((b, i) => {
-        if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
+        if (b.x < 0 || b.x > worldWidth || b.y < 0 || b.y > worldHeight) {
             remoteBullets.splice(i, 1);
         }
     });
@@ -162,32 +167,37 @@ function update() {
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Local player
-    ctx.fillStyle = "red";
-    ctx.fillRect(player.x, player.y, player.width, player.height);
+    const offsetX = canvas.width / 2 - player.x;
+    const offsetY = canvas.height / 2 - player.y;
 
-    // Remote players
+    ctx.fillStyle = "red";
+    ctx.fillRect(canvas.width / 2, canvas.height / 2, player.width, player.height);
+
     ctx.fillStyle = "green";
     for (const id in remotePlayers) {
         const p = remotePlayers[id];
-        ctx.fillRect(p.x, p.y, player.width, player.height);
+        ctx.fillRect(p.x + offsetX, p.y + offsetY, player.width, player.height);
     }
 
-    // Local bullets
     ctx.fillStyle = "yellow";
     for (const bullet of bullets) {
-        ctx.fillRect(bullet.x, bullet.y, bulletSize, bulletSize);
+        ctx.fillRect(bullet.x + offsetX, bullet.y + offsetY, bulletSize, bulletSize);
     }
 
-    // Remote bullets
     ctx.fillStyle = "orange";
     for (const bullet of remoteBullets) {
-        ctx.fillRect(bullet.x, bullet.y, bulletSize, bulletSize);
+        ctx.fillRect(bullet.x + offsetX, bullet.y + offsetY, bulletSize, bulletSize);
     }
 
     ctx.fillStyle = "brown";
     for (let z of zombies) {
-        ctx.fillRect(z.x, z.y, zombieSize, zombieSize);
+        ctx.fillRect(z.x + offsetX, z.y + offsetY, zombieSize, zombieSize);
+
+        // Optional: draw detection radius
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+        ctx.beginPath();
+        ctx.arc(z.x + offsetX + zombieSize / 2, z.y + offsetY + zombieSize / 2, 300, 0, Math.PI * 2);
+        ctx.stroke();
     }
 }
 
